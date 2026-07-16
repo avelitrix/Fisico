@@ -1,16 +1,21 @@
-FÍSICO v1 — AVELITRIX
+FÍSICO v1.3 — ajustes visuais e novos gráficos
 
-Abra index.html por um servidor web/HTTPS.
-Importa ZIP Garmin com FIT, ou FIT/TCX/GPX/CSV individuais.
-Procura automaticamente jogos AveliCoach no localStorage do mesmo domínio.
-O botão “Carregar exemplo” usa dados Garmin simulados e o jogo Caip Soyer fornecido pelo usuário.
+Principais inclusões desta versão:
+- seleção do jogo/treino do AveliCoach no localStorage;
+- gráficos empilhados verticalmente;
+- zoom compartilhado entre os gráficos temporais;
+- arraste horizontal no corpo do gráfico após aplicar zoom;
+- gráfico de presença apenas do atleta com marcadores por ponto;
+- gráfico de BPM e zona cardíaca;
+- gráfico de velocidade ao longo do tempo;
+- resumo de zonas na atividade com texto explicativo no ícone "i";
+- recuperação cardíaca entre pontos;
+- intervalo entre pontos;
+- FC inicial x final de cada game;
+- distância por ponto;
+- gráfico e tabela de estado fisiológico x local do erro;
+- gráfico e tabela de estado fisiológico x golpe errado;
+- tabela de Pontos sincronizados com coluna de golpe após Encerramento.
 
-A classificação “estado fisiológico estimado” é uma interpretação comparativa da FC por ponto, não diagnóstico emocional.
-
-
-CORREÇÕES v1.1
-- Service Worker somente em HTTP/HTTPS.
-- Exemplo incorporado, sem fetch/CORS em file://.
-- Leitura recursiva de jogos em diferentes estruturas do localStorage.
-- Busca no armazenamento da janela, parent e top quando mesma origem.
-- Diagnóstico de origem e armazenamento na faixa de status.
+Observação:
+- para ler automaticamente o AveliCoach, publique este módulo no mesmo domínio/origem do Avelitrix.

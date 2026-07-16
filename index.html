@@ -1,12 +1,129 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#143b31"><title>Físico — Avelitrix</title><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icons/icon.svg"><link rel="stylesheet" href="styles.css"></head><body>
-<header><div class="brand"><div class="logo">F</div><div><h1>Físico</h1><small>Avelitrix • Garmin + AveliCoach</small></div></div><div class="actions"><button id="btnImport">Importar Garmin</button><input id="fileInput" type="file" multiple accept=".zip,.fit,.tcx,.gpx,.csv,.json" hidden><button id="btnSample" class="ghost">Carregar exemplo</button><button id="btnExport" class="ghost">Exportar ▾</button></div></header>
-<main><section id="status" class="status">Importe um ZIP Garmin, arquivos individuais ou carregue o exemplo simulado.</section>
-<section id="dashboard" hidden>
-<div class="summary" id="summary"></div>
-<section class="card hero"><div class="cardhead"><div><h2>Presença e estado fisiológico por ponto</h2><p>Curva apenas do atleta. Marcadores: erro fundo/lado, erro na rede e dupla falta.</p></div><div class="zoomtools"><button id="zoomOut">−</button><input id="zoomRange" type="range" min="1" max="8" step="0.25" value="1"><button id="zoomIn">+</button><button id="zoomReset">Tudo</button></div></div><div class="legend"><span><i class="dot red"></i>Erro fundo/lado</span><span><i class="dot blue"></i>Erro na rede</span><span><i class="tri green"></i>Dupla falta</span><span><i class="vline"></i>Fim de game</span></div><div id="chartWrap" class="chartwrap"><canvas id="presenceChart" height="560"></canvas></div><div id="pointTip" class="tip" hidden></div></section>
-<div class="grid2"><section class="card"><h2>BPM e zona cardíaca</h2><canvas id="hrChart" height="310"></canvas></section><section class="card"><h2>Zonas na atividade</h2><div id="zones"></div><p class="note">As zonas usam os limites presentes no arquivo. Na simulação, usam limites demonstrativos. Não equivalem, sozinhas, a um estado emocional.</p></section></div>
-<section class="card"><h2>Estado fisiológico estimado × padrão de erro</h2><p class="note">Percentuais descrevem associação observada, não causalidade. Cada célula mostra percentual e contagem.</p><div class="tablewrap"><table id="errorTable"></table></div></section>
-<section class="card"><h2>Pontos sincronizados</h2><div class="tablewrap"><table id="pointsTable"></table></div></section>
-</section></main>
-<div id="exportMenu" class="menu" hidden><button data-exp="json">Exportar JSON</button><button data-exp="html">Exportar HTML</button><button data-exp="pdf">Exportar PDF</button></div>
-<footer>Físico v1.1 • leitura ampliada do localStorage</footer><script src="sample-data.js"></script><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#173c33">
+  <title>Físico — Avelitrix</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">F</div>
+    <div>
+      <h1>Físico</h1>
+      <small>Avelitrix • Garmin + AveliCoach</small>
+    </div>
+  </div>
+  <div class="actions">
+    <button id="btnImport">Importar Garmin</button>
+    <input id="fileInput" type="file" multiple accept=".zip,.fit,.tcx,.gpx,.csv,.json" hidden>
+    <button id="btnSample" class="ghost">Carregar exemplo</button>
+    <button id="btnExport" class="ghost">Exportar ▾</button>
+  </div>
+</header>
+<main>
+  <section id="status" class="status">Importe um ZIP Garmin, arquivos individuais ou carregue o exemplo simulado.</section>
+  <section id="coachPicker" class="coach-picker" hidden>
+    <div>
+      <label for="coachSelect">Jogo ou treino do AveliCoach</label>
+      <select id="coachSelect"></select>
+      <small id="coachPickerHint">Escolha o registro salvo no localStorage que será cruzado com a atividade Garmin.</small>
+    </div>
+    <button id="btnRefreshCoach" type="button">Atualizar lista</button>
+  </section>
+  <section id="dashboard" hidden>
+    <div class="summary" id="summary"></div>
+
+    <section class="card chart-card hero">
+      <div class="cardhead">
+        <div>
+          <h2>Presença e estado fisiológico por ponto</h2>
+          <p>Curva apenas do atleta. Marcadores: erro fundo/lado, erro na rede e dupla falta.</p>
+        </div>
+        <div class="zoomtools">
+          <button id="zoomOut" type="button">−</button>
+          <input id="zoomRange" type="range" min="1" max="8" step="0.25" value="1">
+          <button id="zoomIn" type="button">+</button>
+          <button id="zoomReset" type="button">Tudo</button>
+        </div>
+      </div>
+      <div class="legend legend-tight">
+        <span><i class="dot red"></i>Erro fundo/lado</span>
+        <span><i class="dot blue"></i>Erro na rede</span>
+        <span><i class="tri green"></i>Dupla falta</span>
+        <span><i class="vline"></i>Fim de game</span>
+      </div>
+      <div class="chartwrap"><canvas id="presenceChart" height="520"></canvas></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>BPM e zona cardíaca</h2><p>Gráfico temporal com linhas de fim de game e o mesmo zoom dos demais gráficos temporais.</p></div></div>
+      <div class="chartwrap"><canvas id="hrChart" height="250"></canvas></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>Velocidade ao longo do tempo</h2><p>Velocidade registrada pelo GPS, exibida em km/h.</p></div></div>
+      <div class="chartwrap"><canvas id="speedChart" height="230"></canvas></div>
+    </section>
+
+    <section class="card">
+      <div class="cardhead">
+        <div><h2>Zonas na atividade</h2><p>Resumo acumulado do tempo gasto em cada zona.</p></div>
+        <button id="btnZonesInfo" class="iconbtn" type="button" aria-label="Informações sobre zonas de frequência cardíaca">i</button>
+      </div>
+      <div id="zones"></div>
+      <div id="zonesInfo" class="infobox" hidden></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>Recuperação cardíaca entre pontos</h2><p>Queda de BPM entre o encerramento de um ponto e o menor BPM antes do próximo ponto.</p></div></div>
+      <div class="chartwrap"><canvas id="recoveryChart" height="220"></canvas></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>Intervalo entre pontos</h2><p>Duração em segundos até o ponto seguinte.</p></div></div>
+      <div class="chartwrap"><canvas id="intervalChart" height="220"></canvas></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>FC inicial × final de cada game</h2><p>Comparação da FC no começo e no encerramento de cada game.</p></div></div>
+      <div class="chartwrap"><canvas id="gameHrChart" height="220"></canvas></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>Distância por ponto</h2><p>Distância registrada entre um ponto e o próximo.</p></div></div>
+      <div class="chartwrap"><canvas id="distanceChart" height="220"></canvas></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>Estado fisiológico × local do erro</h2><p>Distribuição dos erros associados a cada estado fisiológico estimado.</p></div></div>
+      <div class="chartwrap"><canvas id="errorLocationChart" height="250"></canvas></div>
+      <div class="tablewrap compact"><table id="errorLocationTable"></table></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="cardhead"><div><h2>Estado fisiológico × golpe errado</h2><p>Distribuição dos golpes com erro em cada estado fisiológico estimado.</p></div></div>
+      <div class="chartwrap"><canvas id="errorStrokeChart" height="270"></canvas></div>
+      <div class="tablewrap compact"><table id="errorStrokeTable"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Pontos sincronizados</h2>
+      <div class="tablewrap"><table id="pointsTable"></table></div>
+    </section>
+  </section>
+</main>
+<div id="exportMenu" class="menu" hidden>
+  <button data-exp="json">Exportar JSON</button>
+  <button data-exp="html">Exportar HTML</button>
+  <button data-exp="pdf">Exportar PDF</button>
+</div>
+<div id="pointTip" class="tip" hidden></div>
+<script src="sample-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
