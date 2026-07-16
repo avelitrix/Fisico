@@ -17,6 +17,7 @@ let GAMES = [];
 let VIEW = {zoom:1, pan:0};
 let CHART_META = {};
 let ZONE_INFO_OPEN = false;
+const PAN_DRAG = {active:false, pointerId:null, lastX:0, canvas:null, raf:0};
 
 if ('serviceWorker' in navigator && ['http:','https:'].includes(location.protocol)) {
   navigator.serviceWorker.register('./sw.js').catch(()=>{});
@@ -403,10 +404,8 @@ function drawAll(){
   drawSpeedChart();
   drawRecoveryChart();
   drawIntervalChart();
-  drawGameHrChart();
   drawDistanceChart();
-  drawErrorLocationChart();
-  drawErrorStrokeChart();
+  drawGameHrChart();
 }
 
 function timeWindow(){
@@ -417,16 +416,52 @@ function timeX(ms, w, L, R, W){ return L + (ms - w.start) / Math.max(1, w.end-w.
 function visibleRecords(){ const w=timeWindow(); return (DATA.records||[]).filter(r=>r.ms>=w.start && r.ms<=w.end); }
 function visiblePoints(){ const w=timeWindow(); return POINTS.filter(p=>p.time>=w.start && p.time<=w.end); }
 function attachPanZoom(canvas){
-  canvas.onwheel = e => { e.preventDefault(); const old=VIEW.zoom, rect=canvas.getBoundingClientRect(), cursor=(e.clientX-rect.left)/rect.width; VIEW.zoom=Math.max(1,Math.min(8,VIEW.zoom*(e.deltaY<0?1.15:.87))); $('#zoomRange').value=VIEW.zoom; const oldVis=1/old, newVis=1/VIEW.zoom, focus=VIEW.pan*(1-oldVis)+cursor*oldVis; VIEW.pan = Math.max(0, Math.min(1-newVis, focus-cursor*newVis)); if(newVis>=1) VIEW.pan=0; drawAll(); };
-  let dragging=false,last=0;
-  canvas.onpointerdown = e => { if(VIEW.zoom<=1) return; dragging=true; last=e.clientX; canvas.classList.add('dragging'); canvas.setPointerCapture?.(e.pointerId); };
-  canvas.onpointermove = e => { if(!dragging) return; const dx=e.clientX-last; last=e.clientX; const vis = 1/VIEW.zoom; if(vis>=1) return; VIEW.pan = Math.max(0, Math.min(1-vis, VIEW.pan - dx/canvas.clientWidth*vis)); drawAll(); };
-  const end = ()=>{ dragging=false; canvas.classList.remove('dragging'); };
-  canvas.onpointerup = end; canvas.onpointercancel = end; canvas.onpointerleave = e=>{ if(!dragging) $('#pointTip').hidden=true; };
+  if(canvas.dataset.panZoomBound==='1') return;
+  canvas.dataset.panZoomBound='1';
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const old=VIEW.zoom, rect=canvas.getBoundingClientRect(), cursor=(e.clientX-rect.left)/Math.max(1,rect.width);
+    VIEW.zoom=Math.max(1,Math.min(8,VIEW.zoom*(e.deltaY<0?1.15:.87)));
+    $('#zoomRange').value=VIEW.zoom;
+    const oldVis=1/old, newVis=1/VIEW.zoom, focus=VIEW.pan*(1-oldVis)+cursor*oldVis;
+    VIEW.pan = newVis>=1 ? 0 : Math.max(0,Math.min(1-newVis,focus-cursor*newVis));
+    drawAll();
+  }, {passive:false});
+  canvas.addEventListener('pointerdown', e => {
+    if(VIEW.zoom<=1) return;
+    PAN_DRAG.active=true; PAN_DRAG.pointerId=e.pointerId; PAN_DRAG.lastX=e.clientX; PAN_DRAG.canvas=canvas;
+    canvas.classList.add('dragging');
+    canvas.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', e => {
+    if(!PAN_DRAG.active || PAN_DRAG.pointerId!==e.pointerId || PAN_DRAG.canvas!==canvas) return;
+    const dx=e.clientX-PAN_DRAG.lastX; PAN_DRAG.lastX=e.clientX;
+    const vis=1/VIEW.zoom;
+    VIEW.pan=Math.max(0,Math.min(1-vis,VIEW.pan-dx/Math.max(1,canvas.clientWidth)*vis));
+    if(!PAN_DRAG.raf){ PAN_DRAG.raf=requestAnimationFrame(()=>{ PAN_DRAG.raf=0; drawAll(); }); }
+    e.preventDefault();
+  });
+  const end=e=>{
+    if(PAN_DRAG.pointerId!==null && e.pointerId!==undefined && PAN_DRAG.pointerId!==e.pointerId) return;
+    PAN_DRAG.active=false; PAN_DRAG.pointerId=null;
+    if(PAN_DRAG.canvas) PAN_DRAG.canvas.classList.remove('dragging');
+    PAN_DRAG.canvas=null;
+  };
+  canvas.addEventListener('pointerup',end);
+  canvas.addEventListener('pointercancel',end);
+  canvas.addEventListener('lostpointercapture',end);
 }
 
 function baseCanvas(canvasId, height){
-  const c=$(canvasId); const box=c.parentElement.getBoundingClientRect(); const dpr=window.devicePixelRatio||1; c.width=Math.floor(box.width*dpr); c.height=Math.floor(height*dpr); const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,box.width,height); attachPanZoom(c); return {c,ctx,W:box.width,H:height};
+  const c=$(canvasId); if(!c) return {c:null,ctx:null,W:0,H:height};
+  const box=c.parentElement.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+  const targetW=Math.max(1,Math.floor(box.width*dpr)), targetH=Math.max(1,Math.floor(height*dpr));
+  if(c.width!==targetW) c.width=targetW;
+  if(c.height!==targetH) c.height=targetH;
+  const ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,box.width,height);
+  attachPanZoom(c);
+  return {c,ctx,W:box.width,H:height};
 }
 function drawPresence(){
   const {c,ctx: x,W,H} = baseCanvas('#presenceChart',520); const w=timeWindow(); const pts=POINTS; if(!pts.length) return;
@@ -594,13 +629,88 @@ function hexAlpha(hex,a){ const h=hex.replace('#',''); const num=parseInt(h,16);
 
 function exportData(type){
   $('#exportMenu').hidden=true;
-  if(type==='pdf'){ window.print(); return; }
-  const payload={exportedAt:new Date().toISOString(),version:'Fisico_v1.3',activity:DATA,coach:COACH,points:POINTS,games:GAMES};
+  const payload={exportedAt:new Date().toISOString(),version:'Fisico_v1.4',activity:DATA,coach:COACH,points:POINTS,games:GAMES};
   if(type==='json') download('fisico_'+fmtFileDate()+'.json', JSON.stringify(payload,null,2), 'application/json');
-  else {
-    const html='<!doctype html>'+document.documentElement.outerHTML.replace('</body>', `<script>window.__FISICO_EXPORT__=${JSON.stringify(payload).replace(/</g,'\\u003c')}<\/script></body>`);
-    download('fisico_'+fmtFileDate()+'.html', html, 'text/html');
-  }
+  else if(type==='html') exportStandaloneHtml(payload);
+  else if(type==='pdf') exportDirectPdf(payload);
 }
+
+function canvasSnapshot(id){
+  const c=$(id); return c ? c.toDataURL('image/png') : '';
+}
+function collectEmbeddedCss(){
+  let css='';
+  for(const sheet of [...document.styleSheets]){
+    try{ css += [...sheet.cssRules].map(r=>r.cssText).join('\n')+'\n'; }catch{}
+  }
+  return css;
+}
+function exportStandaloneHtml(payload){
+  const chartIds=['#presenceChart','#hrChart','#speedChart','#recoveryChart','#intervalChart','#distanceChart','#gameHrChart'];
+  const chartTitles=['Presença e estado fisiológico por ponto','BPM e zona cardíaca','Velocidade ao longo do tempo','Recuperação cardíaca entre pontos','Intervalo entre pontos','Distância por ponto','FC inicial × final de cada game'];
+  const charts=chartIds.map((id,i)=>({title:chartTitles[i],src:canvasSnapshot(id)}));
+  const summary=$('#summary').innerHTML;
+  const zones=$('#zones').innerHTML;
+  const errorLocation=$('#errorLocationTable').outerHTML;
+  const errorStroke=$('#errorStrokeTable').outerHTML;
+  const points=$('#pointsTable').outerHTML;
+  const css=collectEmbeddedCss()+`body{padding:18px}.export-toolbar{display:flex;gap:8px;margin-bottom:12px}.export-chart{margin:12px 0;padding:12px;border:1px solid #c3d2ca;border-radius:12px;background:#eef3ef}.export-chart img{width:100%;display:block}.export-only{display:block}header,.actions,#status,#coachPicker,#dashboard,.menu,.tip{display:none!important}`;
+  const safePayload=JSON.stringify(payload).replace(/</g,'\\u003c');
+  const html=`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Físico — ${fmtFileDate()}</title><style>${css}</style></head><body><h1>Físico — Avelitrix</h1><div class="export-toolbar"><button id="btnJson">Baixar JSON</button></div><div class="summary">${summary}</div>${charts.map(c=>`<section class="export-chart"><h2>${c.title}</h2><img src="${c.src}" alt="${c.title}"></section>`).join('')}<section class="card"><h2>Zonas na atividade</h2>${zones}</section><section class="card"><h2>Estado fisiológico × local do erro</h2>${errorLocation}</section><section class="card"><h2>Estado fisiológico × golpe errado</h2>${errorStroke}</section><section class="card"><h2>Pontos sincronizados</h2><div class="tablewrap">${points}</div></section><script>const REPORT=${safePayload};document.getElementById('btnJson').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(REPORT,null,2)],{type:'application/json'}));a.download='fisico_'+new Date(REPORT.activity.startTime).toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)};<\/script></body></html>`;
+  download('fisico_'+fmtFileDate()+'.html',html,'text/html');
+}
+
+async function exportDirectPdf(payload){
+  const pages=[];
+  pages.push(makeSummaryPdfPage());
+  const charts=[
+    ['Presença e estado fisiológico por ponto','#presenceChart'],
+    ['BPM e zona cardíaca','#hrChart'],
+    ['Velocidade ao longo do tempo','#speedChart'],
+    ['Recuperação cardíaca entre pontos','#recoveryChart'],
+    ['Intervalo entre pontos','#intervalChart'],
+    ['Distância por ponto','#distanceChart'],
+    ['FC inicial × final de cada game','#gameHrChart']
+  ];
+  charts.forEach(([title,id])=>pages.push(makeChartPdfPage(title,$(id))));
+  pages.push(...makeTablePdfPages('Estado fisiológico × local do erro',$('#errorLocationTable'),24));
+  pages.push(...makeTablePdfPages('Estado fisiológico × golpe errado',$('#errorStrokeTable'),24));
+  pages.push(...makeTablePdfPages('Pontos sincronizados',$('#pointsTable'),30));
+  const blob=buildPdfFromCanvases(pages);
+  downloadBlob('fisico_'+fmtFileDate()+'.pdf',blob);
+}
+function makePageCanvas(){ const c=document.createElement('canvas'); c.width=1400; c.height=990; const x=c.getContext('2d'); x.fillStyle='#ffffff'; x.fillRect(0,0,c.width,c.height); return c; }
+function drawPdfHeader(x,title){ x.fillStyle='#173c33'; x.fillRect(0,0,1400,70); x.fillStyle='#ffffff'; x.font='bold 28px Arial'; x.fillText(title,34,45); x.fillStyle='#4b625b'; x.font='16px Arial'; x.fillText('Físico — Avelitrix',34,94); }
+function makeSummaryPdfPage(){
+  const c=makePageCanvas(),x=c.getContext('2d'); drawPdfHeader(x,'Resumo da atividade');
+  const vals=[['Data',fmtDate(DATA.startTime)],['Duração',fmtDur(DATA.durationSec)],['Distância',((DATA.distanceM||0)/1000).toFixed(2)+' km'],['FC média',Math.round(DATA.avgHr||0)+' bpm'],['FC máxima',Math.round(DATA.maxHr||0)+' bpm'],['Calorias',String(DATA.calories??'—')]];
+  vals.forEach((v,i)=>{const col=i%3,row=Math.floor(i/3),px=40+col*440,py=135+row*135;x.fillStyle='#eef3ef';x.strokeStyle='#bfcfc7';x.fillRect(px,py,405,105);x.strokeRect(px,py,405,105);x.fillStyle='#5a716a';x.font='16px Arial';x.fillText(v[0],px+18,py+30);x.fillStyle='#173c33';x.font='bold 28px Arial';x.fillText(v[1],px+18,py+72)});
+  x.fillStyle='#173c33';x.font='bold 23px Arial';x.fillText('Zonas na atividade',40,445);
+  const bounds=getZoneBounds(); let y=480; const total=(DATA.records||[]).length||1; for(let z=1;z<=5;z++){const count=(DATA.records||[]).filter(r=>zoneOf(r.hr)===z).length,pct=count/total*100;x.fillStyle=STATE_COLORS[z];x.fillRect(40,y,Math.max(4,pct*8),22);x.fillStyle='#173c33';x.font='16px Arial';x.fillText(`Zona ${z} · ${bounds[z]}–${bounds[z+1]} bpm · ${getZoneLabel(z)} · ${pct.toFixed(1)}%`,40,y-7);y+=78}
+  return c;
+}
+function makeChartPdfPage(title,source){ const c=makePageCanvas(),x=c.getContext('2d');drawPdfHeader(x,title);if(source){const ratio=Math.min(1320/source.width,820/source.height);const w=source.width*ratio,h=source.height*ratio;x.drawImage(source,40,130,w,h)}return c; }
+function makeTablePdfPages(title,table,rowsPerPage){
+  const rows=[...table.querySelectorAll('tr')].map(tr=>[...tr.children].map(td=>td.innerText.trim())); if(!rows.length)return[];
+  const header=rows[0],body=rows.slice(1),pages=[];
+  for(let start=0;start<body.length;start+=rowsPerPage){const c=makePageCanvas(),x=c.getContext('2d');drawPdfHeader(x,title);const chunk=body.slice(start,start+rowsPerPage);const cols=header.length,colW=1320/cols;let y=130;x.fillStyle='#dfe9e4';x.fillRect(40,y,1320,34);x.fillStyle='#173c33';x.font='bold 13px Arial';header.forEach((v,i)=>x.fillText(trunc(v,18),44+i*colW,y+22));y+=34;x.font='12px Arial';chunk.forEach((row,ri)=>{x.fillStyle=ri%2?'#f3f6f4':'#ffffff';x.fillRect(40,y,1320,27);x.fillStyle='#263f38';row.forEach((v,i)=>x.fillText(trunc(v,18),44+i*colW,y+18));y+=27});pages.push(c)}return pages;
+}
+function trunc(s,n){s=String(s??'');return s.length>n?s.slice(0,n-1)+'…':s;}
+function buildPdfFromCanvases(canvases){
+  const enc=new TextEncoder(),objects=[],offsets=[0];
+  const add=obj=>{objects.push(obj);return objects.length};
+  const pageIds=[],imageIds=[];
+  canvases.forEach(c=>{const bytes=dataUrlBytes(c.toDataURL('image/jpeg',0.88));const imgId=add({bin:bytes,head:`<< /Type /XObject /Subtype /Image /Width ${c.width} /Height ${c.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${bytes.length} >>\nstream\n`,tail:'\nendstream'});imageIds.push(imgId)});
+  const pagesId=add('PAGES_PLACEHOLDER');
+  canvases.forEach((c,i)=>{const content=`q\n842 0 0 595 0 0 cm\n/Im${i+1} Do\nQ`;const contentId=add(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);const pageId=add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 842 595] /Resources << /XObject << /Im${i+1} ${imageIds[i]} 0 R >> >> /Contents ${contentId} 0 R >>`);pageIds.push(pageId)});
+  objects[pagesId-1]=`<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map(id=>id+' 0 R').join(' ')}] >>`;
+  const catalogId=add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+  const chunks=[enc.encode('%PDF-1.4\n%âãÏÓ\n')];let pos=chunks[0].length;
+  objects.forEach((o,i)=>{offsets[i+1]=pos;const prefix=enc.encode(`${i+1} 0 obj\n`);chunks.push(prefix);pos+=prefix.length;if(typeof o==='string'){const b=enc.encode(o);chunks.push(b);pos+=b.length}else{const h=enc.encode(o.head);chunks.push(h);pos+=h.length;chunks.push(o.bin);pos+=o.bin.length;const t=enc.encode(o.tail);chunks.push(t);pos+=t.length}const end=enc.encode('\nendobj\n');chunks.push(end);pos+=end.length});
+  const xref=pos;let table=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n`;for(let i=1;i<=objects.length;i++)table+=String(offsets[i]).padStart(10,'0')+' 00000 n \n';table+=`trailer\n<< /Size ${objects.length+1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  chunks.push(enc.encode(table));return new Blob(chunks,{type:'application/pdf'});
+}
+function dataUrlBytes(url){const b64=url.split(',')[1],bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u;}
+function downloadBlob(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);}
 function fmtFileDate(){ return new Date(DATA?.startTime || Date.now()).toISOString().slice(0,10); }
 function download(name,text,mime){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:mime})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
